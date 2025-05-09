@@ -1,5 +1,5 @@
-#ifndef FUNCTIONS_H
-#define FUNCTIONS_H
+#ifndef DIRECTORY_H
+#define DIRECTORY_H
 
 #include <time.h>
 #include <stdio.h> 
@@ -42,20 +42,7 @@ void write_directory(FILE *fp, struct directory *dir); //Grava o diretório no f
 
 void delete_directory(FILE *fp); //Deleta o diretório do arquivo.vc
 
-void read_directory(FILE *fp,struct directory *dir); //Lê o diretório no final do arquivo
+int read_directory(FILE *fp,struct directory *dir); //Lê o diretório no final do arquivo, qnt de membros se sucedido, 0 se falhar
 
-// Operações principais do VINAc
 
-void op_ip(const char *archive_name, char **members, int member_count);    //Insere membro sem compressão
-
-void op_ic();    //Insere membro com compressão
-
-void op_m();     //Move o membro indicado na linha de comando para diretamente após o target (para mover para o início o target tem que ser NULL)
-
-void op_x();     //Extrai os membros indicados, se não indicado, extrai todos
-
-void op_r();     //Remove os membros indicados
-
-void op_c();     //lista o conteúdo do archive, incluindo as propriedades de cada membro
-
-#endif //FUNCTIONS.H
+#endif //directory.h

@@ -1,9 +1,11 @@
 #include "lz.h"
 #include "functions.h"
+#include "directory.h"
+#include "aux.h"
 #include <sys/stat.h> 
-#include <unistd.h>    
+#include <unistd.h> 
 
-//Operações do diretório e inicializações/liberação
+//Funções para a manipulação do diretório
 
 struct directory *directory_init(){
     struct directory *dir = malloc(sizeof(struct directory));
@@ -18,13 +20,13 @@ struct directory *directory_init(){
 }
 
 void add_member(struct directory *dir,struct info_members_t *member){
-    struct info_members_t *new_vector = realloc(dir->vector, (dir->member_qnt + 1) *sizeof(struct info_members_t)); //Realoca memória para o vetor para adicionar um novo membro
-    if(new_vector == NULL){
+    dir->vector = realloc(dir->vector, (dir->member_qnt + 1) *sizeof(struct info_members_t)); //Realoca memória para o vetor para adicionar um novo membro
+    if(dir->vector == NULL){
         printf("Erro ao alocar memória no diretório\n");
         return; //retorna se a alocação falhar
     }
-    dir->vector = new_vector;  //atualiza o vetor com a nova alocação
-
+   
+    member->ordem = dir->member_qnt;
     dir->vector[dir->member_qnt] = *member; //adiciona o novo membro (copia os dados)
     dir->member_qnt++;  //incrementa qnt de membros
 }
@@ -38,6 +40,7 @@ void del_member(struct directory *dir, int index){ //remove pelo index (achado d
     //Mover todos os membros após o índice para a posição anterior
     for(int i = index; i < dir->member_qnt - 1; i++){
         dir->vector[i] = dir->vector[i+1];
+        dir->vector[i].ordem -= 1;
     }
 
     // Reduzir quantidade de membros;
@@ -53,18 +56,36 @@ void del_member(struct directory *dir, int index){ //remove pelo index (achado d
 
 void move_member(struct directory *dir, int member_index, int target_index){
     struct info_members_t temp = dir->vector[member_index]; //auxiliar
+    time_t current_time;
+    time(&current_time);
 
     if(member_index < target_index){  //mover membros posteriores até o target para esquerda (membro indo para a direita)
         for(int i = member_index; i < target_index; i++){
             dir->vector[i] = dir->vector[i+1];
+            dir->vector[i].offset = dir->vector[i+1].offset - temp.tam_d; //ajusta offset;
+            dir->vector[i].ordem -= 1;
         }
         dir->vector[target_index] = temp;
+        dir->vector[target_index].offset = dir->vector[target_index - 1].offset + dir->vector[target_index - 1].tam_d;
+        dir->vector[target_index].mod = current_time;
+        dir->vector[target_index].ordem = dir->vector[target_index-1].ordem + 1;
     }
-    else{   //mover membros anteriores para direita (membro indo para esquerda)
+    else if((member_index != target_index) && (member_index - target_index > 1)){   //mover membros anteriores para direita (membro indo para esquerda)
         for(int i = member_index; i > target_index + 1; i--){
             dir->vector[i] = dir->vector[i-1];
+            dir->vector[i].offset = dir->vector[i-1].offset + temp.tam_d;
+            dir->vector[i].ordem += 1;
         }
         dir->vector[target_index + 1] = temp;
+        if(target_index == -1){
+            dir->vector[target_index+1].offset = 0;
+            dir->vector[target_index+1].ordem = 0;
+        }
+        else{
+            dir->vector[target_index+1].offset = dir->vector[target_index].offset + dir->vector[target_index].tam_d;
+            dir->vector[target_index+1].ordem = dir->vector[target_index].ordem + 1;
+        }
+        dir->vector[target_index+1].mod = current_time;
     }
 }
 
@@ -77,6 +98,7 @@ void destroy_directory(struct directory *dir){
     free(dir->vector);        //libera aloc do vetor;
     dir->vector = NULL;
     free(dir);                //libera aloc do diretorio;
+    dir = NULL;
     return;     
 }
 
@@ -94,25 +116,30 @@ void write_directory(FILE *fp, struct directory *dir){  //necessário remoção 
     }
     dir->offset = dir_offset;
 
-    // Escreve o número de membros (member_qnt)
-    if (fwrite(&dir->member_qnt, sizeof(int), 1, fp) != 1) {
-        printf("Erro ao escrever o número de membros no arquivo. (write_directory)\n");
-        return;
-    }
+    if(dir->member_qnt > 0){
+        // Escreve o número de membros (member_qnt)
+        if (fwrite(&dir->member_qnt, sizeof(int), 1, fp) != 1) {
+            printf("Erro ao escrever o número de membros no arquivo. (write_directory)\n");
+            return;
+        }
 
-    // Escreve todos os membros
-    if (fwrite(dir->vector, sizeof(struct info_members_t), dir->member_qnt, fp) != dir->member_qnt) {
-        printf("Erro ao escrever os membros no arquivo. (write_directory)\n");
-        return;
-    }
+        // Escreve todos os membros
+        if (fwrite(dir->vector, sizeof(struct info_members_t), dir->member_qnt, fp) != dir->member_qnt) {
+            printf("Erro ao escrever os membros no arquivo. (write_directory)\n");
+            return;
+        }
 
-    // Escreve o offset do diretório no final do arquivo
-    if (fwrite(&dir_offset, sizeof(long int), 1, fp) != 1) {
-        printf("Erro ao escrever o offset do diretório no final do arquivo. (write_directory)\n");
-        return;
-    }
+        // Escreve o offset do diretório no final do arquivo
+        if (fwrite(&dir_offset, sizeof(long int), 1, fp) != 1) {
+            printf("Erro ao escrever o offset do diretório no final do arquivo. (write_directory)\n");
+            return;
+        }
 
-    fflush(fp); //garante que o conteúdo foi gravado no disco.
+        if(fflush(fp) != 0){ //garante que o conteúdo foi gravado no disco.
+            printf("Erro ao garantir escrita no disco. (write_directory)\n");
+            return;
+        } 
+    }
 }
 
 void delete_directory(FILE *fp){
@@ -135,17 +162,17 @@ void delete_directory(FILE *fp){
     }
 }
 
-void read_directory(FILE *fp, struct directory *dir){
+int read_directory(FILE *fp, struct directory *dir){
     if(fp == NULL || dir == NULL){
         printf("Arquivo ou diretório inválido. (read_directory)\n");
-        return;
+        return 0;
     }
 
     fseek(fp,-sizeof(long int),SEEK_END);                        //Acha o offset do diretório para leitura;
     long int dir_offset;
     if(fread(&dir_offset,sizeof(long int),1,fp) != 1){                          //lê o offset.
         printf("Erro ao ler o offset do diretório. (read_directory)\n");
-        return;
+        return 0;
     }
 
     fseek(fp, dir_offset,SEEK_SET); // Vai onde o diretório começa
@@ -153,123 +180,21 @@ void read_directory(FILE *fp, struct directory *dir){
     // Lê o número de membros
     if(fread(&dir->member_qnt,sizeof(int),1,fp) !=1){
         printf("Erro ao ler o número de membros. (read_directory)\n");
-        return;
+        return 0;
     }
 
     // Aloca memória para os membros
     dir->vector = malloc(dir->member_qnt * sizeof(struct info_members_t));
     if (dir->vector == NULL) {
         printf("Erro ao alocar memória para os membros. (read_directory)\n");
-        return;
+        return 0;
     }
 
      // Lê os membros
      if (fread(dir->vector, sizeof(struct info_members_t), dir->member_qnt, fp) != dir->member_qnt) {
         printf("Erro ao ler os membros do diretório. (read_directory)\n");
-        return;
+        return 0;
     }
 
-    printf("Diretório lido com sucesso! Número de membros: %d\n", dir->member_qnt); //Print para depuração
+    return dir->member_qnt; //Retorna
 }
-
-//Funções auxiliares
-
-int find_member_index(struct directory *dir,const char *name){  //retorna -1 se não achar membro
-    for(int i = 0; i < dir->member_qnt;i++){
-        if (strcmp(dir->vector[i].nome, name) == 0){
-            return i;
-        }
-    }
-    return -1;
-}
-
-//Funções para operações dos membros no archive
-
-void op_ip(const char *archive_name, char **members, int member_count){
-    FILE *fp = fopen(archive_name, "r+b");
-    struct directory *dir = directory_init();
-
-    if(fp == NULL){     //Arquivo não existe, cria um novo
-        fp = fopen(archive_name,"w+b");
-        if(fp == NULL){
-            printf("Erro ao criar novo arquivo.\n");
-            return;
-        }
-    }else {
-        read_directory(fp,dir); //copia o diretorio do archive na memória
-        delete_directory(fp); //remove diretorio do archive
-    }
-
-    for(int i = 0; i < member_count; i++){
-        const char *member_name = members[i];
-
-        int index = find_member_index(dir, member_name);
-        if(index != -1){
-            //REMOVER MEMBRO DO ARCHIVE E DO DIRETÓRIO (chamar op_r)
-        }
-
-        FILE *mf = fopen(member_name,"rb");
-        if(mf == NULL){
-            printf("Erro ao abrir membro %s.\n", member_name);
-            continue;
-        }
-        fseek(mf,0,SEEK_END); 
-        long size = ftell(mf); //salva tamanho do arquivo
-        fseek(mf,0,SEEK_SET);
-
-        //onde será adiconado o arquivo
-        fseek(fp,0,SEEK_END);
-        long int offset = ftell(fp);
-
-        //Aloca Buffer
-        char *buffer = malloc(size);
-        if(buffer == NULL){
-            printf("Erro ao alocar memória para o buffer. (op_ip)\n");
-            fclose(mf);
-            continue;
-        }
-
-        // Lê o conteudo para o buffer;
-        size_t bytes = fread(buffer,1,size,mf);
-        if (bytes != size) {
-            printf("Erro ao ler o conteúdo do membro %s.\n", member_name);
-            free(buffer);
-            fclose(mf);
-            continue;
-        }
-
-        //Escreve o conteudo do buffer no archive
-        if (fwrite(buffer, 1, bytes, fp) != bytes) {
-            printf("Erro ao escrever no archive.\n");
-            fclose(mf);
-            free(buffer);
-            continue;
-        }
-        fclose(mf);
-        free(buffer);
-
-        // Preenche info do membro
-        struct info_members_t info;
-        struct stat sta;
-        if (stat(member_name, &sta) == 0) {  // Preenche a estrutura com informações do arquivo
-            strcpy(info.nome, member_name);
-            info.offset = offset;
-            info.tam_d = size;
-            info.tam_o = size;
-            info.ordem = dir->member_qnt + 1;
-            info.uid = getuid();
-            info.mod = sta.st_mtime;  // Atribui o tempo de modificação do arquivo
-        
-            // Adiciona o membro ao diretório
-            add_member(dir, &info);
-        } else {
-            printf("Erro ao obter informações do arquivo. (op_ip) %s.\n", member_name);
-        }
-    }
-    write_directory(fp, dir);
-    fclose(fp);
-    destroy_directory(dir);
-}
-
-
-
