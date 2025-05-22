@@ -212,6 +212,10 @@ void op_x(FILE *fp, struct directory *dir, char **members, int member_count) {
         if (is_compressed) free(output_data);
 
         printf("Extraído: %s\n", m->nome);
+        
+        if(!is_compressed){
+            free(buffer);        
+        }
     }
 }
 
